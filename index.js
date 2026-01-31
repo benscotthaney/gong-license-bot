@@ -194,6 +194,47 @@ async function findContactByEmail(email) {
 }
 
 /**
+ * Find contact by email AND account ID (more thorough search)
+ * This helps find contacts that might exist on the account even if email search didn't work
+ */
+async function findContactByEmailAndAccount(email, accountId) {
+  try {
+    // First try exact email match on account
+    let result = await sfConnection.query(
+      `SELECT Id, Name, Email, AccountId, Account.Name, Account.Type
+       FROM Contact
+       WHERE Email = '${email}' AND AccountId = '${accountId}'
+       LIMIT 1`
+    );
+
+    if (result.records.length > 0) {
+      return result.records[0];
+    }
+
+    // Try case-insensitive email search on account
+    result = await sfConnection.query(
+      `SELECT Id, Name, Email, AccountId, Account.Name, Account.Type
+       FROM Contact
+       WHERE AccountId = '${accountId}'
+       LIMIT 10`
+    );
+
+    // Check for email match (case-insensitive)
+    const emailLower = email.toLowerCase();
+    for (const contact of result.records) {
+      if (contact.Email && contact.Email.toLowerCase() === emailLower) {
+        return contact;
+      }
+    }
+
+    return null;
+  } catch (error) {
+    console.error('â Error searching for contact by email and account:', error.message);
+    return null;
+  }
+}
+
+/**
  * Get Account details by ID
  */
 async function getAccountById(accountId) {
@@ -537,31 +578,38 @@ app.message(async ({ message, client, logger }) => {
       if (account) {
         logger.info(`â Found account: ${account.Name} (${account.Id})`);
 
-        // Extract customer admin name
-        const adminName = extractCustomerAdminName(text);
-
-        if (adminName) {
-          logger.info(`ð¤ Creating contact: ${adminName.firstName} ${adminName.lastName}`);
-
-          contact = await createContact(
-            adminName.firstName,
-            adminName.lastName,
-            customerEmail,
-            account.Id
-          );
-
-          if (contact) {
-            contactCreated = true;
-            logger.info(`â Contact created successfully`);
-          }
+        // Try to find existing contact on this account (might exist with slightly different email search)
+        const existingContact = await findContactByEmailAndAccount(customerEmail, account.Id);
+        if (existingContact) {
+          logger.info(`â Found existing contact on account: ${existingContact.Name}`);
+          contact = existingContact;
         } else {
-          logger.warn('â ï¸ Could not extract customer admin name from message');
-          await postThreadReply(client, message,
-            `â ï¸ Contact not found for: \`${customerEmail}\`\n` +
-            `Found account: *${account.Name}*\n` +
-            `Could not extract admin name to create contact.\n\n` +
-            `Please create the contact manually.`);
-          return;
+          // Extract customer admin name
+          const adminName = extractCustomerAdminName(text);
+
+          if (adminName) {
+            logger.info(`ð¤ Creating contact: ${adminName.firstName} ${adminName.lastName}`);
+
+            contact = await createContact(
+              adminName.firstName,
+              adminName.lastName,
+              customerEmail,
+              account.Id
+            );
+
+            if (contact) {
+              contactCreated = true;
+              logger.info(`â Contact created successfully`);
+            }
+          } else {
+            logger.warn('â ï¸ Could not extract customer admin name from message');
+            await postThreadReply(client, message,
+              `â ï¸ Contact not found for: \`${customerEmail}\`\n` +
+              `Found account: *${account.Name}*\n` +
+              `Could not extract admin name to create contact.\n\n` +
+              `Please create the contact manually.`);
+            return;
+          }
         }
       } else {
         const emailDomain = customerEmail.split('@')[1];
@@ -764,17 +812,25 @@ app.event('app_mention', async ({ event, client, logger }) => {
       }
 
       if (account) {
-        const adminName = extractCustomerAdminName(parentMessage.text);
-        if (adminName) {
-          contact = await createContact(
-            adminName.firstName,
-            adminName.lastName,
-            customerEmail,
-            account.Id
-          );
-          if (contact) {
-            contactCreated = true;
-            logger.info(`â Contact created: ${contact.Name}`);
+        // First try to find existing contact on this account
+        const existingContact = await findContactByEmailAndAccount(customerEmail, account.Id);
+        if (existingContact) {
+          logger.info(`â Found existing contact on account: ${existingContact.Name}`);
+          contact = existingContact;
+        } else {
+          // Try to create new contact
+          const adminName = extractCustomerAdminName(parentMessage.text);
+          if (adminName) {
+            contact = await createContact(
+              adminName.firstName,
+              adminName.lastName,
+              customerEmail,
+              account.Id
+            );
+            if (contact) {
+              contactCreated = true;
+              logger.info(`â Contact created: ${contact.Name}`);
+            }
           }
         }
       }
