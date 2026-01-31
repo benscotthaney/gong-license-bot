@@ -66,7 +66,7 @@ async function initSalesforce() {
       accessToken: tokenData.access_token,
     });
 
-    console.log('✅ Connected to Salesforce (Client Credentials Flow)');
+    console.log('â Connected to Salesforce (Client Credentials Flow)');
     console.log(`   Instance URL: ${tokenData.instance_url}`);
 
     // Cache the Gong Reseller Account ID if not already set
@@ -76,7 +76,7 @@ async function initSalesforce() {
 
     return true;
   } catch (error) {
-    console.error('❌ Salesforce connection failed:', error.message);
+    console.error('â Salesforce connection failed:', error.message);
     return false;
   }
 }
@@ -92,12 +92,12 @@ async function cacheGongResellerAccountId() {
 
     if (result.records.length > 0) {
       CONFIG.gongResellerAccountId = result.records[0].Id;
-      console.log(`✅ Cached Gong Reseller Account ID: ${CONFIG.gongResellerAccountId}`);
+      console.log(`â Cached Gong Reseller Account ID: ${CONFIG.gongResellerAccountId}`);
     } else {
-      console.warn(`⚠️ Could not find account named "${CONFIG.gongResellerAccountName}"`);
+      console.warn(`â ï¸ Could not find account named "${CONFIG.gongResellerAccountName}"`);
     }
   } catch (error) {
-    console.error('❌ Error caching Gong Reseller Account ID:', error.message);
+    console.error('â Error caching Gong Reseller Account ID:', error.message);
   }
 }
 
@@ -188,7 +188,7 @@ async function findContactByEmail(email) {
     }
     return null;
   } catch (error) {
-    console.error('❌ Error searching for contact:', error.message);
+    console.error('â Error searching for contact:', error.message);
     return null;
   }
 }
@@ -210,7 +210,7 @@ async function getAccountById(accountId) {
     }
     return null;
   } catch (error) {
-    console.error('❌ Error fetching account:', error.message);
+    console.error('â Error fetching account:', error.message);
     return null;
   }
 }
@@ -226,7 +226,7 @@ async function findAccountByDomain(email) {
       return null;
     }
 
-    console.log(`🔍 Searching for account by domain: ${domain}`);
+    console.log(`ð Searching for account by domain: ${domain}`);
 
     // Search by Website field containing the domain
     let result = await sfConnection.query(
@@ -237,7 +237,7 @@ async function findAccountByDomain(email) {
     );
 
     if (result.records.length > 0) {
-      console.log(`✅ Found account by website: ${result.records[0].Name}`);
+      console.log(`â Found account by website: ${result.records[0].Name}`);
       return result.records[0];
     }
 
@@ -252,7 +252,7 @@ async function findAccountByDomain(email) {
       );
 
       if (result.records.length > 0) {
-        console.log(`✅ Found account by Domain__c: ${result.records[0].Name}`);
+        console.log(`â Found account by Domain__c: ${result.records[0].Name}`);
         return result.records[0];
       }
     } catch (e) {
@@ -261,7 +261,7 @@ async function findAccountByDomain(email) {
 
     return null;
   } catch (error) {
-    console.error('❌ Error searching for account by domain:', error.message);
+    console.error('â Error searching for account by domain:', error.message);
     return null;
   }
 }
@@ -297,7 +297,7 @@ async function findAccountByName(accountName) {
 
     return null;
   } catch (error) {
-    console.error('❌ Error searching for account by name:', error.message);
+    console.error('â Error searching for account by name:', error.message);
     return null;
   }
 }
@@ -317,7 +317,7 @@ async function createContact(firstName, lastName, email, accountId) {
     const result = await sfConnection.sobject('Contact').create(contactData);
 
     if (result.success) {
-      console.log(`✅ Created Contact: ${firstName} ${lastName} (${result.id})`);
+      console.log(`â Created Contact: ${firstName} ${lastName} (${result.id})`);
 
       // Fetch the full contact record to return
       const contact = await sfConnection.query(
@@ -339,11 +339,11 @@ async function createContact(firstName, lastName, email, accountId) {
         AccountId: accountId,
       };
     } else {
-      console.error('❌ Failed to create contact:', result.errors);
+      console.error('â Failed to create contact:', result.errors);
       return null;
     }
   } catch (error) {
-    console.error('❌ Error creating contact:', error.message);
+    console.error('â Error creating contact:', error.message);
     return null;
   }
 }
@@ -368,33 +368,42 @@ async function createOpportunity(contact, account, customerName) {
       CloseDate: closeDateStr,
       Type: 'Inbound',
       LeadSource: 'Partner', // Since it's from Gong
+      // Hardcoded fields for all Gong License Bot requests
+      BillingAccount__c: '001PK00000XxXxxYAF',
+      Won_Lost_Reason__c: 'Gong Reseller Referral',
+      Main_Competitor__c: 'No Competitor',
+      MSA_Redlines__c: 'No',
     };
 
-    // Add Billing Account if we have the Gong Reseller Account ID
-    if (CONFIG.gongResellerAccountId) {
-      opportunityData.Billing_Account__c = CONFIG.gongResellerAccountId;
+    // Add Contact fields if we have the contact ID
+    if (contact && contact.Id) {
+      opportunityData.OnBoarding_Contact__c = contact.Id;
+      opportunityData.Primary_Contact__c = contact.Id;
     }
 
     const result = await sfConnection.sobject('Opportunity').create(opportunityData);
 
     if (result.success) {
-      console.log(`✅ Created Opportunity: ${oppName} (${result.id})`);
+      console.log(`â Created Opportunity: ${oppName} (${result.id})`);
+      console.log(`   AccountId: ${account.Id}`);
+      console.log(`   BillingAccount__c: 001PK00000XxXxxYAF`);
+      console.log(`   OnBoarding_Contact__c: ${contact?.Id || 'not set'}`);
       return {
         id: result.id,
         name: oppName,
         url: `${CONFIG.sfInstanceUrl}/lightning/r/Opportunity/${result.id}/view`,
       };
     } else {
-      console.error('❌ Failed to create opportunity:', result.errors);
+      console.error('â Failed to create opportunity:', result.errors);
       return null;
     }
   } catch (error) {
-    console.error('❌ Error creating opportunity:', error.message);
+    console.error('â Error creating opportunity:', error.message);
 
-    // If the Billing_Account__c field doesn't exist, try without it
-    if (error.message.includes('Billing_Account__c') || error.message.includes('No such column')) {
-      console.log('⚠️ Billing_Account__c field not found, retrying without it...');
-      return await createOpportunityWithoutBilling(contact, account);
+    // If a custom field doesn't exist, try without it
+    if (error.message.includes('BillingAccount__c') || error.message.includes('OnBoarding_Contact__c') || error.message.includes('No such column')) {
+      console.log('â ï¸ Custom field not found, retrying with basic fields...');
+      return await createOpportunityWithoutCustomFields(contact, account);
     }
 
     return null;
@@ -402,9 +411,9 @@ async function createOpportunity(contact, account, customerName) {
 }
 
 /**
- * Create opportunity without Billing Account field (fallback)
+ * Create opportunity without custom fields (fallback)
  */
-async function createOpportunityWithoutBilling(contact, account) {
+async function createOpportunityWithoutCustomFields(contact, account) {
   try {
     const closeDate = new Date();
     closeDate.setDate(closeDate.getDate() + 30);
@@ -424,17 +433,17 @@ async function createOpportunityWithoutBilling(contact, account) {
     const result = await sfConnection.sobject('Opportunity').create(opportunityData);
 
     if (result.success) {
-      console.log(`✅ Created Opportunity (without Billing Account): ${oppName} (${result.id})`);
+      console.log(`â Created Opportunity (without custom fields): ${oppName} (${result.id})`);
       return {
         id: result.id,
         name: oppName,
         url: `${CONFIG.sfInstanceUrl}/lightning/r/Opportunity/${result.id}/view`,
-        note: '⚠️ Note: Billing Account was not set - please add manually',
+        note: 'â ï¸ Note: BillingAccount__c and OnBoarding_Contact__c were not set - please add manually',
       };
     }
     return null;
   } catch (error) {
-    console.error('❌ Error creating opportunity (fallback):', error.message);
+    console.error('â Error creating opportunity (fallback):', error.message);
     return null;
   }
 }
@@ -471,7 +480,7 @@ app.message(async ({ message, client, logger }) => {
       return;
     }
 
-    logger.info('🔔 New ChiliPiper License Request detected!');
+    logger.info('ð New ChiliPiper License Request detected!');
 
     // Add eyes emoji to show we're processing
     try {
@@ -489,21 +498,21 @@ app.message(async ({ message, client, logger }) => {
     const customerName = extractCustomerName(text);
 
     if (!customerEmail) {
-      logger.warn('⚠️ Could not extract customer admin email from message');
+      logger.warn('â ï¸ Could not extract customer admin email from message');
       await postThreadReply(client, message,
-        '⚠️ Could not extract customer admin email from this request. Please process manually.');
+        'â ï¸ Could not extract customer admin email from this request. Please process manually.');
       return;
     }
 
-    logger.info(`📧 Customer Admin Email: ${customerEmail}`);
-    logger.info(`🏢 Customer Name: ${customerName}`);
+    logger.info(`ð§ Customer Admin Email: ${customerEmail}`);
+    logger.info(`ð¢ Customer Name: ${customerName}`);
 
     // Ensure Salesforce connection
     if (!sfConnection) {
       const connected = await initSalesforce();
       if (!connected) {
         await postThreadReply(client, message,
-          '❌ Could not connect to Salesforce. Please process manually.');
+          'â Could not connect to Salesforce. Please process manually.');
         return;
       }
     }
@@ -513,26 +522,26 @@ app.message(async ({ message, client, logger }) => {
     let contactCreated = false;
 
     if (!contact) {
-      logger.warn(`⚠️ Contact not found in Salesforce: ${customerEmail}`);
+      logger.warn(`â ï¸ Contact not found in Salesforce: ${customerEmail}`);
 
       // Try to find the account by domain first (e.g., amtechsoftware.com from jtipton@amtechsoftware.com)
-      logger.info(`🔍 Searching for account by email domain...`);
+      logger.info(`ð Searching for account by email domain...`);
       let account = await findAccountByDomain(customerEmail);
 
       // Fallback to company name search if domain search fails
       if (!account && customerName) {
-        logger.info(`🔍 Domain search failed, trying company name: ${customerName}`);
+        logger.info(`ð Domain search failed, trying company name: ${customerName}`);
         account = await findAccountByName(customerName);
       }
 
       if (account) {
-        logger.info(`✅ Found account: ${account.Name} (${account.Id})`);
+        logger.info(`â Found account: ${account.Name} (${account.Id})`);
 
         // Extract customer admin name
         const adminName = extractCustomerAdminName(text);
 
         if (adminName) {
-          logger.info(`👤 Creating contact: ${adminName.firstName} ${adminName.lastName}`);
+          logger.info(`ð¤ Creating contact: ${adminName.firstName} ${adminName.lastName}`);
 
           contact = await createContact(
             adminName.firstName,
@@ -543,12 +552,12 @@ app.message(async ({ message, client, logger }) => {
 
           if (contact) {
             contactCreated = true;
-            logger.info(`✅ Contact created successfully`);
+            logger.info(`â Contact created successfully`);
           }
         } else {
-          logger.warn('⚠️ Could not extract customer admin name from message');
+          logger.warn('â ï¸ Could not extract customer admin name from message');
           await postThreadReply(client, message,
-            `⚠️ Contact not found for: \`${customerEmail}\`\n` +
+            `â ï¸ Contact not found for: \`${customerEmail}\`\n` +
             `Found account: *${account.Name}*\n` +
             `Could not extract admin name to create contact.\n\n` +
             `Please create the contact manually.`);
@@ -556,9 +565,9 @@ app.message(async ({ message, client, logger }) => {
         }
       } else {
         const emailDomain = customerEmail.split('@')[1];
-        logger.warn(`⚠️ Account not found by domain (${emailDomain}) or name (${customerName})`);
+        logger.warn(`â ï¸ Account not found by domain (${emailDomain}) or name (${customerName})`);
         await postThreadReply(client, message,
-          `⚠️ Contact not found in Salesforce for email: \`${customerEmail}\`\n` +
+          `â ï¸ Contact not found in Salesforce for email: \`${customerEmail}\`\n` +
           `Account not found by domain: *${emailDomain}*\n` +
           `Account not found by name: *${customerName || 'Unknown'}*\n\n` +
           `Please create the account, contact, and opportunity manually.`);
@@ -567,21 +576,21 @@ app.message(async ({ message, client, logger }) => {
 
       if (!contact) {
         await postThreadReply(client, message,
-          `⚠️ Contact not found and could not be created for: \`${customerEmail}\`\n` +
+          `â ï¸ Contact not found and could not be created for: \`${customerEmail}\`\n` +
           `Customer Name: ${customerName || 'Unknown'}\n\n` +
           `Please create the contact and opportunity manually.`);
         return;
       }
     }
 
-    logger.info(`✅ Found Contact: ${contact.Name} (Account: ${contact.Account?.Name})`);
+    logger.info(`â Found Contact: ${contact.Name} (Account: ${contact.Account?.Name})`);
 
     // Get account details
     const account = contact.Account || await getAccountById(contact.AccountId);
 
     if (!account) {
       await postThreadReply(client, message,
-        `⚠️ Could not find account for contact: ${contact.Name}\n` +
+        `â ï¸ Could not find account for contact: ${contact.Name}\n` +
         `Please process manually.`);
       return;
     }
@@ -589,12 +598,12 @@ app.message(async ({ message, client, logger }) => {
     const accountType = account.Type || 'Unknown';
     const urls = buildSalesforceUrls(contact, account);
 
-    logger.info(`📊 Account Type: ${accountType}`);
+    logger.info(`ð Account Type: ${accountType}`);
 
     // Handle based on account type
     if (accountType.toLowerCase() === 'prospect') {
       // Create opportunity for Prospect
-      logger.info('🚀 Creating opportunity for Prospect account...');
+      logger.info('ð Creating opportunity for Prospect account...');
 
       const opportunity = await createOpportunity(contact, account, customerName);
 
@@ -608,7 +617,7 @@ app.message(async ({ message, client, logger }) => {
           });
         } catch (e) {}
 
-        let replyText = `✅ *Opportunity Created!*\n\n` +
+        let replyText = `â *Opportunity Created!*\n\n` +
           `*Account:* <${urls.accountUrl}|${account.Name}>\n` +
           `*Account Type:* Prospect\n` +
           `*Contact:* <${urls.contactUrl}|${contact.Name}>${contactCreated ? ' _(newly created)_' : ''}\n` +
@@ -624,7 +633,7 @@ app.message(async ({ message, client, logger }) => {
         await postThreadReply(client, message, replyText);
       } else {
         await postThreadReply(client, message,
-          `❌ Failed to create opportunity for ${account.Name}.\n` +
+          `â Failed to create opportunity for ${account.Name}.\n` +
           `*Account:* <${urls.accountUrl}|${account.Name}>\n` +
           `*Contact:* <${urls.contactUrl}|${contact.Name}>\n\n` +
           `Please create the opportunity manually.`);
@@ -632,7 +641,7 @@ app.message(async ({ message, client, logger }) => {
 
     } else {
       // Customer account - don't create opportunity, just notify
-      logger.info('ℹ️ Customer account - notifying team');
+      logger.info('â¹ï¸ Customer account - notifying team');
 
       // Add info reaction
       try {
@@ -643,7 +652,7 @@ app.message(async ({ message, client, logger }) => {
         });
       } catch (e) {}
 
-      const replyText = `ℹ️ *Existing Customer Account*\n\n` +
+      const replyText = `â¹ï¸ *Existing Customer Account*\n\n` +
         `*Account:* <${urls.accountUrl}|${account.Name}>\n` +
         `*Account Type:* ${accountType}\n` +
         `*Contact:* <${urls.contactUrl}|${contact.Name}>${contactCreated ? ' _(newly created)_' : ''}\n\n` +
@@ -677,7 +686,7 @@ app.event('app_mention', async ({ event, client, logger }) => {
       await client.chat.postMessage({
         channel: event.channel,
         thread_ts: event.ts,
-        text: '👋 To process a license request, mention me in the thread of a Zapier message.',
+        text: 'ð To process a license request, mention me in the thread of a Zapier message.',
       });
       return;
     }
@@ -694,7 +703,7 @@ app.event('app_mention', async ({ event, client, logger }) => {
       await client.chat.postMessage({
         channel: event.channel,
         thread_ts: event.thread_ts,
-        text: '❌ Could not find the parent message.',
+        text: 'â Could not find the parent message.',
       });
       return;
     }
@@ -702,7 +711,7 @@ app.event('app_mention', async ({ event, client, logger }) => {
     const parentMessage = result.messages[0];
 
     // Process the parent message as if it were a new license request
-    logger.info('📋 Manual processing triggered via @mention');
+    logger.info('ð Manual processing triggered via @mention');
 
     // Simulate the message object
     const simulatedMessage = {
@@ -716,7 +725,7 @@ app.event('app_mention', async ({ event, client, logger }) => {
       await client.chat.postMessage({
         channel: event.channel,
         thread_ts: event.thread_ts,
-        text: '❌ Could not find a customer email in this message.',
+        text: 'â Could not find a customer email in this message.',
       });
       return;
     }
@@ -724,7 +733,7 @@ app.event('app_mention', async ({ event, client, logger }) => {
     await client.chat.postMessage({
       channel: event.channel,
       thread_ts: event.thread_ts,
-      text: `🔄 Processing license request for: ${customerEmail}`,
+      text: `ð Processing license request for: ${customerEmail}`,
     });
 
     // Check Salesforce connection
@@ -734,22 +743,50 @@ app.event('app_mention', async ({ event, client, logger }) => {
         await client.chat.postMessage({
           channel: event.channel,
           thread_ts: event.thread_ts,
-          text: '❌ Could not connect to Salesforce. Please try again later.',
+          text: 'â Could not connect to Salesforce. Please try again later.',
         });
         return;
       }
     }
 
     // Find the contact
-    const contact = await findContactByEmail(customerEmail);
+    let contact = await findContactByEmail(customerEmail);
+    let contactCreated = false;
+    const customerName = extractCustomerName(parentMessage.text);
+
     if (!contact) {
-      const customerName = extractCustomerName(parentMessage.text);
-      await client.chat.postMessage({
-        channel: event.channel,
-        thread_ts: event.thread_ts,
-        text: `❌ Contact not found for: ${customerEmail}\nCustomer Name: ${customerName || 'Unknown'}\nPlease create manually.`,
-      });
-      return;
+      // Try to find account and create contact
+      logger.info(`â ï¸ Contact not found, searching for account by domain...`);
+
+      let account = await findAccountByDomain(customerEmail);
+      if (!account && customerName) {
+        account = await findAccountByName(customerName);
+      }
+
+      if (account) {
+        const adminName = extractCustomerAdminName(parentMessage.text);
+        if (adminName) {
+          contact = await createContact(
+            adminName.firstName,
+            adminName.lastName,
+            customerEmail,
+            account.Id
+          );
+          if (contact) {
+            contactCreated = true;
+            logger.info(`â Contact created: ${contact.Name}`);
+          }
+        }
+      }
+
+      if (!contact) {
+        await client.chat.postMessage({
+          channel: event.channel,
+          thread_ts: event.thread_ts,
+          text: `â Contact not found for: ${customerEmail}\nCustomer Name: ${customerName || 'Unknown'}\nCould not auto-create contact. Please create manually.`,
+        });
+        return;
+      }
     }
 
     // Get account
@@ -758,7 +795,7 @@ app.event('app_mention', async ({ event, client, logger }) => {
       await client.chat.postMessage({
         channel: event.channel,
         thread_ts: event.thread_ts,
-        text: `❌ Could not find account for contact: ${contact.Name}`,
+        text: `â Could not find account for contact: ${contact.Name}`,
       });
       return;
     }
@@ -781,10 +818,10 @@ app.event('app_mention', async ({ event, client, logger }) => {
           });
         } catch (e) {}
 
-        let replyText = `✅ *Opportunity Created!*\n\n` +
+        let replyText = `â *Opportunity Created!*\n\n` +
           `*Account:* <${urls.accountUrl}|${account.Name}>\n` +
           `*Account Type:* Prospect\n` +
-          `*Contact:* <${urls.contactUrl}|${contact.Name}>\n` +
+          `*Contact:* <${urls.contactUrl}|${contact.Name}>${contactCreated ? ' _(newly created)_' : ''}\n` +
           `*Opportunity:* <${opportunity.url}|${opportunity.name}>`;
 
         if (opportunity.note) {
@@ -803,7 +840,7 @@ app.event('app_mention', async ({ event, client, logger }) => {
         await client.chat.postMessage({
           channel: event.channel,
           thread_ts: event.thread_ts,
-          text: `❌ Failed to create opportunity for ${account.Name}.\n` +
+          text: `â Failed to create opportunity for ${account.Name}.\n` +
             `*Account:* <${urls.accountUrl}|${account.Name}>\n` +
             `*Contact:* <${urls.contactUrl}|${contact.Name}>\n\n` +
             `Please create the opportunity manually.`,
@@ -819,10 +856,10 @@ app.event('app_mention', async ({ event, client, logger }) => {
         });
       } catch (e) {}
 
-      const replyText = `ℹ️ *Existing Customer Account*\n\n` +
+      const replyText = `â¹ï¸ *Existing Customer Account*\n\n` +
         `*Account:* <${urls.accountUrl}|${account.Name}>\n` +
         `*Account Type:* ${accountType}\n` +
-        `*Contact:* <${urls.contactUrl}|${contact.Name}>\n\n` +
+        `*Contact:* <${urls.contactUrl}|${contact.Name}>${contactCreated ? ' _(newly created)_' : ''}\n\n` +
         `No opportunity created - this is an existing customer.\n\n` +
         `<@${CONFIG.customerTagUser}> - please review this license request.`;
 
@@ -839,7 +876,7 @@ app.event('app_mention', async ({ event, client, logger }) => {
       await client.chat.postMessage({
         channel: event.channel,
         thread_ts: event.thread_ts || event.ts,
-        text: `❌ Error processing request: ${error.message}`,
+        text: `â Error processing request: ${error.message}`,
       });
     } catch (e) {}
   }
@@ -857,7 +894,7 @@ async function postThreadReply(client, message, text) {
       unfurl_links: false,
     });
   } catch (error) {
-    console.error('❌ Error posting thread reply:', error.message);
+    console.error('â Error posting thread reply:', error.message);
   }
 }
 
@@ -870,9 +907,9 @@ async function postThreadReply(client, message, text) {
   await app.start(port);
 
   console.log('');
-  console.log('⚡️ Gong License Bot is running!');
-  console.log(`📡 Monitoring channel: ${CONFIG.licenseRequestChannel}`);
-  console.log(`👤 Customer tag user: ${CONFIG.customerTagUser}`);
-  console.log(`🔗 Salesforce instance: ${CONFIG.sfInstanceUrl}`);
+  console.log('â¡ï¸ Gong License Bot is running!');
+  console.log(`ð¡ Monitoring channel: ${CONFIG.licenseRequestChannel}`);
+  console.log(`ð¤ Customer tag user: ${CONFIG.customerTagUser}`);
+  console.log(`ð Salesforce instance: ${CONFIG.sfInstanceUrl}`);
   console.log('');
 })();
