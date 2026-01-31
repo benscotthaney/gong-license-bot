@@ -142,8 +142,9 @@ function extractCustomerName(text) {
  */
 function extractCustomerAdminName(text) {
   // Look for "Customer Admin:" followed by the name before the email
-  // Pattern: "Customer Admin: FirstName LastName email@example.com"
-  const pattern = /Customer Admin:\s*([A-Za-z]+)\s+([A-Za-z]+)\s+[a-zA-Z0-9._%+-]+@/i;
+  // Handle both plain text and Slack's link format: <mailto:email@example.com|email@example.com>
+  // Pattern: "Customer Admin: FirstName LastName email@..." or "Customer Admin: FirstName LastName <mailto:..."
+  const pattern = /Customer Admin:\s*([A-Za-z]+)\s+([A-Za-z]+)\s+(?:<mailto:|[a-zA-Z0-9._%+-]+@)/i;
   const match = text.match(pattern);
 
   if (match) {
@@ -154,10 +155,11 @@ function extractCustomerAdminName(text) {
   }
 
   // Fallback: try to extract any name before the email on the Customer Admin line
-  const lines = text.split('\n');
+  // Normalize line breaks (handle \r\n, \r, \n)
+  const lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
   for (const line of lines) {
     if (line.toLowerCase().includes('customer admin')) {
-      // Try to find name pattern before email
+      // Try to find name pattern - just capture two words after "Customer Admin:"
       const nameMatch = line.match(/Customer Admin:\s*([A-Za-z]+)\s+([A-Za-z]+)/i);
       if (nameMatch) {
         return {
