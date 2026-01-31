@@ -128,7 +128,6 @@ async function createOpportunity(contact, account) {
               CloseDate: closeDateStr,
               Type: 'Inbound',
               LeadSource: 'Partner',
-              ContactId: contact.Id,
       };
 
       if (CONFIG.gongResellerAccountId) {
@@ -168,7 +167,6 @@ async function createOpportunityWithoutBilling(contact, account) {
               CloseDate: closeDateStr,
               Type: 'Inbound',
               LeadSource: 'Partner',
-              ContactId: contact.Id,
       });
 
       if (result.success) {
