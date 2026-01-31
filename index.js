@@ -243,6 +243,8 @@ app.message(async ({ message, client, logger }) => {
               if (opportunity) {
                         try { await client.reactions.add({ channel: message.channel, timestamp: message.ts, name: 'white_check_mark' }); } catch (e) {}
                         let replyText = `*Opportunity Created!*\n\n*Account:* <${urls.accountUrl}|${account.Name}>\n*Account Type:* Prospect\n*Contact:* <${urls.contactUrl}|${contact.Name}>\n*Opportunity:* <${opportunity.url}|${opportunity.name}>`;
+                          // Tag Guilherme for review
+                          replyText += `\n\n<@${CONFIG.customerTagUser}> - new prospect opportunity created for review.`;
                         if (opportunity.note) replyText += `\n\n${opportunity.note}`;
                         await postThreadReply(client, message, replyText);
               } else {
