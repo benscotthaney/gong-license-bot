@@ -143,7 +143,7 @@ function extractCustomerName(text) {
 function extractCustomerAdminName(text) {
   // Look for "Customer Admin:" followed by the name before the email
   // Pattern: "Customer Admin: FirstName LastName email@example.com"
-  const pattern = /Customer Admin:\s*([A-Za-z]+)\s+([A-Za-z]+)\s+[a-zA-Z0-9._%+-]+@/i;
+  const pattern = /Customer Admin:\s*([A-Za-z]+)\s+([A-Za-z]+)\s(?:<mailto:|[a-zA-Z0-9._%+-]+@)@/i;
   const match = text.match(pattern);
 
   if (match) {
