@@ -66,7 +66,7 @@ async function initSalesforce() {
       accessToken: tokenData.access_token,
     });
 
-    console.log('â Connected to Salesforce (Client Credentials Flow)');
+    console.log('✅ Connected to Salesforce (Client Credentials Flow)');
     console.log(`   Instance URL: ${tokenData.instance_url}`);
 
     // Cache the Gong Reseller Account ID if not already set
@@ -76,7 +76,7 @@ async function initSalesforce() {
 
     return true;
   } catch (error) {
-    console.error('â Salesforce connection failed:', error.message);
+    console.error('❌ Salesforce connection failed:', error.message);
     return false;
   }
 }
@@ -92,12 +92,12 @@ async function cacheGongResellerAccountId() {
 
     if (result.records.length > 0) {
       CONFIG.gongResellerAccountId = result.records[0].Id;
-      console.log(`â Cached Gong Reseller Account ID: ${CONFIG.gongResellerAccountId}`);
+      console.log(`✅ Cached Gong Reseller Account ID: ${CONFIG.gongResellerAccountId}`);
     } else {
       console.warn(`â ï¸ Could not find account named "${CONFIG.gongResellerAccountName}"`);
     }
   } catch (error) {
-    console.error('â Error caching Gong Reseller Account ID:', error.message);
+    console.error('❌ Error caching Gong Reseller Account ID:', error.message);
   }
 }
 
@@ -141,13 +141,22 @@ function extractCustomerName(text) {
  * Returns { firstName, lastName }
  */
 function extractCustomerAdminName(text) {
+  console.log('📝 Attempting to extract admin name from text...');
+
+  // Clean up Slack formatting - remove link formatting and bold/italic markers
+  let cleanText = text
+    .replace(/<mailto:[^|>]+\|([^>]+)>/g, '$1')  // <mailto:email|display> -> display
+    .replace(/<mailto:[^>]+>/g, '')              // <mailto:email> -> empty
+    .replace(/<[^>]+>/g, '')                     // Remove any other Slack link formatting
+    .replace(/\*/g, '');                         // Remove asterisks (Slack bold formatting)
+
   // Look for "Customer Admin:" followed by the name before the email
-  // Handle both plain text and Slack's link format: <mailto:email@example.com|email@example.com>
-  // Pattern: "Customer Admin: FirstName LastName email@..." or "Customer Admin: FirstName LastName <mailto:..."
-  const pattern = /Customer Admin:\s*([A-Za-z]+)\s+([A-Za-z]+)\s+(?:<mailto:|[a-zA-Z0-9._%+-]+@)/i;
-  const match = text.match(pattern);
+  // Handle names with hyphens, apostrophes, and accented characters
+  const pattern = /Customer Admin:\s*([A-Za-zÀ-ÖØ-öø-ÿ'-]+)\s+([A-Za-zÀ-ÖØ-öø-ÿ'-]+)\s+[a-zA-Z0-9._%+-]+@/i;
+  const match = cleanText.match(pattern);
 
   if (match) {
+    console.log(`✅ Extracted name (primary): ${match[1]} ${match[2]}`);
     return {
       firstName: match[1],
       lastName: match[2]
@@ -156,12 +165,16 @@ function extractCustomerAdminName(text) {
 
   // Fallback: try to extract any name before the email on the Customer Admin line
   // Normalize line breaks (handle \r\n, \r, \n)
-  const lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+  const lines = cleanText.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
   for (const line of lines) {
     if (line.toLowerCase().includes('customer admin')) {
-      // Try to find name pattern - just capture two words after "Customer Admin:"
-      const nameMatch = line.match(/Customer Admin:\s*([A-Za-z]+)\s+([A-Za-z]+)/i);
+      console.log(`📝 Found Customer Admin line: ${line.substring(0, 100)}...`);
+
+      // Try to find name pattern - capture two words after "Customer Admin:"
+      // More flexible pattern that captures names before any email-like pattern
+      const nameMatch = line.match(/Customer Admin:\s*([A-Za-zÀ-ÖØ-öø-ÿ'-]+)\s+([A-Za-zÀ-ÖØ-öø-ÿ'-]+)/i);
       if (nameMatch) {
+        console.log(`✅ Extracted name (fallback): ${nameMatch[1]} ${nameMatch[2]}`);
         return {
           firstName: nameMatch[1],
           lastName: nameMatch[2]
@@ -170,6 +183,7 @@ function extractCustomerAdminName(text) {
     }
   }
 
+  console.log('❌ Could not extract admin name from message');
   return null;
 }
 
@@ -179,7 +193,7 @@ function extractCustomerAdminName(text) {
 async function findContactByEmail(email) {
   try {
     const result = await sfConnection.query(
-      `SELECT Id, Name, Email, AccountId, Account.Name, Account.Type
+      `SELECT Id, Name, Email, AccountId, Account.Id, Account.Name, Account.Type
        FROM Contact
        WHERE Email = '${email}'
        LIMIT 1`
@@ -190,7 +204,7 @@ async function findContactByEmail(email) {
     }
     return null;
   } catch (error) {
-    console.error('â Error searching for contact:', error.message);
+    console.error('❌ Error searching for contact:', error.message);
     return null;
   }
 }
@@ -203,7 +217,7 @@ async function findContactByEmailAndAccount(email, accountId) {
   try {
     // First try exact email match on account
     let result = await sfConnection.query(
-      `SELECT Id, Name, Email, AccountId, Account.Name, Account.Type
+      `SELECT Id, Name, Email, AccountId, Account.Id, Account.Name, Account.Type
        FROM Contact
        WHERE Email = '${email}' AND AccountId = '${accountId}'
        LIMIT 1`
@@ -215,7 +229,7 @@ async function findContactByEmailAndAccount(email, accountId) {
 
     // Try case-insensitive email search on account
     result = await sfConnection.query(
-      `SELECT Id, Name, Email, AccountId, Account.Name, Account.Type
+      `SELECT Id, Name, Email, AccountId, Account.Id, Account.Name, Account.Type
        FROM Contact
        WHERE AccountId = '${accountId}'
        LIMIT 10`
@@ -231,7 +245,7 @@ async function findContactByEmailAndAccount(email, accountId) {
 
     return null;
   } catch (error) {
-    console.error('â Error searching for contact by email and account:', error.message);
+    console.error('❌ Error searching for contact by email and account:', error.message);
     return null;
   }
 }
@@ -253,7 +267,7 @@ async function getAccountById(accountId) {
     }
     return null;
   } catch (error) {
-    console.error('â Error fetching account:', error.message);
+    console.error('❌ Error fetching account:', error.message);
     return null;
   }
 }
@@ -280,7 +294,7 @@ async function findAccountByDomain(email) {
     );
 
     if (result.records.length > 0) {
-      console.log(`â Found account by website: ${result.records[0].Name}`);
+      console.log(`✅ Found account by website: ${result.records[0].Name}`);
       return result.records[0];
     }
 
@@ -295,7 +309,7 @@ async function findAccountByDomain(email) {
       );
 
       if (result.records.length > 0) {
-        console.log(`â Found account by Domain__c: ${result.records[0].Name}`);
+        console.log(`✅ Found account by Domain__c: ${result.records[0].Name}`);
         return result.records[0];
       }
     } catch (e) {
@@ -304,7 +318,7 @@ async function findAccountByDomain(email) {
 
     return null;
   } catch (error) {
-    console.error('â Error searching for account by domain:', error.message);
+    console.error('❌ Error searching for account by domain:', error.message);
     return null;
   }
 }
@@ -340,7 +354,7 @@ async function findAccountByName(accountName) {
 
     return null;
   } catch (error) {
-    console.error('â Error searching for account by name:', error.message);
+    console.error('❌ Error searching for account by name:', error.message);
     return null;
   }
 }
@@ -360,11 +374,11 @@ async function createContact(firstName, lastName, email, accountId) {
     const result = await sfConnection.sobject('Contact').create(contactData);
 
     if (result.success) {
-      console.log(`â Created Contact: ${firstName} ${lastName} (${result.id})`);
+      console.log(`✅ Created Contact: ${firstName} ${lastName} (${result.id})`);
 
       // Fetch the full contact record to return
       const contact = await sfConnection.query(
-        `SELECT Id, Name, Email, AccountId, Account.Name, Account.Type
+        `SELECT Id, Name, Email, AccountId, Account.Id, Account.Name, Account.Type
          FROM Contact
          WHERE Id = '${result.id}'
          LIMIT 1`
@@ -382,11 +396,11 @@ async function createContact(firstName, lastName, email, accountId) {
         AccountId: accountId,
       };
     } else {
-      console.error('â Failed to create contact:', result.errors);
+      console.error('❌ Failed to create contact:', result.errors);
       return null;
     }
   } catch (error) {
-    console.error('â Error creating contact:', error.message);
+    console.error('❌ Error creating contact:', error.message);
     return null;
   }
 }
@@ -412,11 +426,15 @@ async function createOpportunity(contact, account, customerName) {
       Type: 'Inbound',
       LeadSource: 'Partner', // Since it's from Gong
       // Hardcoded fields for all Gong License Bot requests
-      BillingAccount__c: '001PK00000XxXxxYAF',
       Won_Lost_Reason__c: 'Gong Reseller Referral',
       Main_Competitor__c: 'No Competitor',
       MSA_Redlines__c: 'No',
     };
+
+    // Add BillingAccount if we have the Gong Reseller Account ID cached
+    if (CONFIG.gongResellerAccountId) {
+      opportunityData.BillingAccount__c = CONFIG.gongResellerAccountId;
+    }
 
     // Add Contact fields if we have the contact ID
     if (contact && contact.Id) {
@@ -427,9 +445,9 @@ async function createOpportunity(contact, account, customerName) {
     const result = await sfConnection.sobject('Opportunity').create(opportunityData);
 
     if (result.success) {
-      console.log(`â Created Opportunity: ${oppName} (${result.id})`);
+      console.log(`✅ Created Opportunity: ${oppName} (${result.id})`);
       console.log(`   AccountId: ${account.Id}`);
-      console.log(`   BillingAccount__c: 001PK00000XxXxxYAF`);
+      console.log(`   BillingAccount__c: ${CONFIG.gongResellerAccountId || 'not set'}`);
       console.log(`   OnBoarding_Contact__c: ${contact?.Id || 'not set'}`);
       return {
         id: result.id,
@@ -437,11 +455,11 @@ async function createOpportunity(contact, account, customerName) {
         url: `${CONFIG.sfInstanceUrl}/lightning/r/Opportunity/${result.id}/view`,
       };
     } else {
-      console.error('â Failed to create opportunity:', result.errors);
+      console.error('❌ Failed to create opportunity:', result.errors);
       return null;
     }
   } catch (error) {
-    console.error('â Error creating opportunity:', error.message);
+    console.error('❌ Error creating opportunity:', error.message);
 
     // If a custom field doesn't exist, try without it
     if (error.message.includes('BillingAccount__c') || error.message.includes('OnBoarding_Contact__c') || error.message.includes('No such column')) {
@@ -476,7 +494,7 @@ async function createOpportunityWithoutCustomFields(contact, account) {
     const result = await sfConnection.sobject('Opportunity').create(opportunityData);
 
     if (result.success) {
-      console.log(`â Created Opportunity (without custom fields): ${oppName} (${result.id})`);
+      console.log(`✅ Created Opportunity (without custom fields): ${oppName} (${result.id})`);
       return {
         id: result.id,
         name: oppName,
@@ -486,7 +504,7 @@ async function createOpportunityWithoutCustomFields(contact, account) {
     }
     return null;
   } catch (error) {
-    console.error('â Error creating opportunity (fallback):', error.message);
+    console.error('❌ Error creating opportunity (fallback):', error.message);
     return null;
   }
 }
@@ -555,7 +573,7 @@ app.message(async ({ message, client, logger }) => {
       const connected = await initSalesforce();
       if (!connected) {
         await postThreadReply(client, message,
-          'â Could not connect to Salesforce. Please process manually.');
+          '❌ Could not connect to Salesforce. Please process manually.');
         return;
       }
     }
@@ -578,12 +596,12 @@ app.message(async ({ message, client, logger }) => {
       }
 
       if (account) {
-        logger.info(`â Found account: ${account.Name} (${account.Id})`);
+        logger.info(`✅ Found account: ${account.Name} (${account.Id})`);
 
         // Try to find existing contact on this account (might exist with slightly different email search)
         const existingContact = await findContactByEmailAndAccount(customerEmail, account.Id);
         if (existingContact) {
-          logger.info(`â Found existing contact on account: ${existingContact.Name}`);
+          logger.info(`✅ Found existing contact on account: ${existingContact.Name}`);
           contact = existingContact;
         } else {
           // Extract customer admin name
@@ -601,7 +619,7 @@ app.message(async ({ message, client, logger }) => {
 
             if (contact) {
               contactCreated = true;
-              logger.info(`â Contact created successfully`);
+              logger.info(`✅ Contact created successfully`);
             }
           } else {
             logger.warn('â ï¸ Could not extract customer admin name from message');
@@ -633,7 +651,7 @@ app.message(async ({ message, client, logger }) => {
       }
     }
 
-    logger.info(`â Found Contact: ${contact.Name} (Account: ${contact.Account?.Name})`);
+    logger.info(`✅ Found Contact: ${contact.Name} (Account: ${contact.Account?.Name})`);
 
     // Get account details
     const account = contact.Account || await getAccountById(contact.AccountId);
@@ -667,7 +685,7 @@ app.message(async ({ message, client, logger }) => {
           });
         } catch (e) {}
 
-        let replyText = `â *Opportunity Created!*\n\n` +
+        let replyText = `✅ *Opportunity Created!*\n\n` +
           `*Account:* <${urls.accountUrl}|${account.Name}>\n` +
           `*Account Type:* Prospect\n` +
           `*Contact:* <${urls.contactUrl}|${contact.Name}>${contactCreated ? ' _(newly created)_' : ''}\n` +
@@ -683,7 +701,7 @@ app.message(async ({ message, client, logger }) => {
         await postThreadReply(client, message, replyText);
       } else {
         await postThreadReply(client, message,
-          `â Failed to create opportunity for ${account.Name}.\n` +
+          `❌ Failed to create opportunity for ${account.Name}.\n` +
           `*Account:* <${urls.accountUrl}|${account.Name}>\n` +
           `*Contact:* <${urls.contactUrl}|${contact.Name}>\n\n` +
           `Please create the opportunity manually.`);
@@ -691,7 +709,7 @@ app.message(async ({ message, client, logger }) => {
 
     } else {
       // Customer account - don't create opportunity, just notify
-      logger.info('â¹ï¸ Customer account - notifying team');
+      logger.info('ℹ️ Customer account - notifying team');
 
       // Add info reaction
       try {
@@ -702,7 +720,7 @@ app.message(async ({ message, client, logger }) => {
         });
       } catch (e) {}
 
-      const replyText = `â¹ï¸ *Existing Customer Account*\n\n` +
+      const replyText = `ℹ️ *Existing Customer Account*\n\n` +
         `*Account:* <${urls.accountUrl}|${account.Name}>\n` +
         `*Account Type:* ${accountType}\n` +
         `*Contact:* <${urls.contactUrl}|${contact.Name}>${contactCreated ? ' _(newly created)_' : ''}\n\n` +
@@ -753,7 +771,7 @@ app.event('app_mention', async ({ event, client, logger }) => {
       await client.chat.postMessage({
         channel: event.channel,
         thread_ts: event.thread_ts,
-        text: 'â Could not find the parent message.',
+        text: '❌ Could not find the parent message.',
       });
       return;
     }
@@ -775,7 +793,7 @@ app.event('app_mention', async ({ event, client, logger }) => {
       await client.chat.postMessage({
         channel: event.channel,
         thread_ts: event.thread_ts,
-        text: 'â Could not find a customer email in this message.',
+        text: '❌ Could not find a customer email in this message.',
       });
       return;
     }
@@ -783,7 +801,7 @@ app.event('app_mention', async ({ event, client, logger }) => {
     await client.chat.postMessage({
       channel: event.channel,
       thread_ts: event.thread_ts,
-      text: `ð Processing license request for: ${customerEmail}`,
+      text: `🔄 Processing license request for: ${customerEmail}`,
     });
 
     // Check Salesforce connection
@@ -793,7 +811,7 @@ app.event('app_mention', async ({ event, client, logger }) => {
         await client.chat.postMessage({
           channel: event.channel,
           thread_ts: event.thread_ts,
-          text: 'â Could not connect to Salesforce. Please try again later.',
+          text: '❌ Could not connect to Salesforce. Please try again later.',
         });
         return;
       }
@@ -817,7 +835,7 @@ app.event('app_mention', async ({ event, client, logger }) => {
         // First try to find existing contact on this account
         const existingContact = await findContactByEmailAndAccount(customerEmail, account.Id);
         if (existingContact) {
-          logger.info(`â Found existing contact on account: ${existingContact.Name}`);
+          logger.info(`✅ Found existing contact on account: ${existingContact.Name}`);
           contact = existingContact;
         } else {
           // Try to create new contact
@@ -831,7 +849,7 @@ app.event('app_mention', async ({ event, client, logger }) => {
             );
             if (contact) {
               contactCreated = true;
-              logger.info(`â Contact created: ${contact.Name}`);
+              logger.info(`✅ Contact created: ${contact.Name}`);
             }
           }
         }
@@ -841,7 +859,7 @@ app.event('app_mention', async ({ event, client, logger }) => {
         await client.chat.postMessage({
           channel: event.channel,
           thread_ts: event.thread_ts,
-          text: `â Contact not found for: ${customerEmail}\nCustomer Name: ${customerName || 'Unknown'}\nCould not auto-create contact. Please create manually.`,
+          text: `❌ Contact not found for: ${customerEmail}\nCustomer Name: ${customerName || 'Unknown'}\nCould not auto-create contact. Please create manually.`,
         });
         return;
       }
@@ -853,7 +871,7 @@ app.event('app_mention', async ({ event, client, logger }) => {
       await client.chat.postMessage({
         channel: event.channel,
         thread_ts: event.thread_ts,
-        text: `â Could not find account for contact: ${contact.Name}`,
+        text: `❌ Could not find account for contact: ${contact.Name}`,
       });
       return;
     }
@@ -876,7 +894,7 @@ app.event('app_mention', async ({ event, client, logger }) => {
           });
         } catch (e) {}
 
-        let replyText = `â *Opportunity Created!*\n\n` +
+        let replyText = `✅ *Opportunity Created!*\n\n` +
           `*Account:* <${urls.accountUrl}|${account.Name}>\n` +
           `*Account Type:* Prospect\n` +
           `*Contact:* <${urls.contactUrl}|${contact.Name}>${contactCreated ? ' _(newly created)_' : ''}\n` +
@@ -898,7 +916,7 @@ app.event('app_mention', async ({ event, client, logger }) => {
         await client.chat.postMessage({
           channel: event.channel,
           thread_ts: event.thread_ts,
-          text: `â Failed to create opportunity for ${account.Name}.\n` +
+          text: `❌ Failed to create opportunity for ${account.Name}.\n` +
             `*Account:* <${urls.accountUrl}|${account.Name}>\n` +
             `*Contact:* <${urls.contactUrl}|${contact.Name}>\n\n` +
             `Please create the opportunity manually.`,
@@ -914,7 +932,7 @@ app.event('app_mention', async ({ event, client, logger }) => {
         });
       } catch (e) {}
 
-      const replyText = `â¹ï¸ *Existing Customer Account*\n\n` +
+      const replyText = `ℹ️ *Existing Customer Account*\n\n` +
         `*Account:* <${urls.accountUrl}|${account.Name}>\n` +
         `*Account Type:* ${accountType}\n` +
         `*Contact:* <${urls.contactUrl}|${contact.Name}>${contactCreated ? ' _(newly created)_' : ''}\n\n` +
@@ -934,7 +952,7 @@ app.event('app_mention', async ({ event, client, logger }) => {
       await client.chat.postMessage({
         channel: event.channel,
         thread_ts: event.thread_ts || event.ts,
-        text: `â Error processing request: ${error.message}`,
+        text: `❌ Error processing request: ${error.message}`,
       });
     } catch (e) {}
   }
@@ -952,7 +970,7 @@ async function postThreadReply(client, message, text) {
       unfurl_links: false,
     });
   } catch (error) {
-    console.error('â Error posting thread reply:', error.message);
+    console.error('❌ Error posting thread reply:', error.message);
   }
 }
 
