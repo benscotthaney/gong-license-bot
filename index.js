@@ -105,21 +105,31 @@ async function cacheGongResellerAccountId() {
  * Extract customer admin email from Zapier license request message
  */
 function extractCustomerAdminEmail(text) {
+  // Clean up Slack formatting first
+  const cleanText = text
+    .replace(/<mailto:([^|>]+)\|[^>]+>/g, '$1')  // <mailto:email|display> -> email
+    .replace(/<mailto:([^>]+)>/g, '$1')          // <mailto:email> -> email
+    .replace(/\*/g, '');                          // Remove bold markers
+
   // Look for "Customer Admin:" followed by name and email
   const emailPattern = /Customer Admin:.*?([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/i;
-  const match = text.match(emailPattern);
+  const match = cleanText.match(emailPattern);
 
   if (match) {
-    return match[1].toLowerCase();
+    const email = match[1].toLowerCase().trim();
+    console.log(`📧 Extracted email: ${email}`);
+    return email;
   }
 
   // Fallback: try to find any email after "Customer Admin"
-  const lines = text.split('\n');
+  const lines = cleanText.split('\n');
   for (const line of lines) {
     if (line.toLowerCase().includes('customer admin')) {
       const emailMatch = line.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
       if (emailMatch) {
-        return emailMatch[1].toLowerCase();
+        const email = emailMatch[1].toLowerCase().trim();
+        console.log(`📧 Extracted email (fallback): ${email}`);
+        return email;
       }
     }
   }
@@ -131,9 +141,26 @@ function extractCustomerAdminEmail(text) {
  * Extract customer name (company name) from Zapier license request message
  */
 function extractCustomerName(text) {
+  // Clean up Slack formatting first
+  const cleanText = text
+    .replace(/\*/g, '')                           // Remove asterisks (bold)
+    .replace(/<[^>]+>/g, '');                     // Remove Slack link formatting
+
   const pattern = /Customer Name:\s*(.+)/i;
-  const match = text.match(pattern);
-  return match ? match[1].trim() : null;
+  const match = cleanText.match(pattern);
+
+  if (match) {
+    // Also trim any trailing formatting or newline content
+    let name = match[1].trim();
+    // Stop at newline if present
+    const newlinePos = name.indexOf('\n');
+    if (newlinePos > 0) {
+      name = name.substring(0, newlinePos).trim();
+    }
+    console.log(`🏢 Extracted customer name: ${name}`);
+    return name;
+  }
+  return null;
 }
 
 /**
@@ -192,16 +219,23 @@ function extractCustomerAdminName(text) {
  */
 async function findContactByEmail(email) {
   try {
+    // Clean the email - remove any hidden characters or whitespace
+    const cleanEmail = email.trim().toLowerCase();
+    console.log(`🔍 Searching for contact by email: ${cleanEmail}`);
+
     const result = await sfConnection.query(
       `SELECT Id, Name, Email, AccountId, Account.Id, Account.Name, Account.Type
        FROM Contact
-       WHERE Email = '${email}'
+       WHERE Email = '${cleanEmail}'
        LIMIT 1`
     );
 
     if (result.records.length > 0) {
+      console.log(`✅ Found contact: ${result.records[0].Name}`);
       return result.records[0];
     }
+
+    console.log(`⚠️ No contact found with email: ${cleanEmail}`);
     return null;
   } catch (error) {
     console.error('❌ Error searching for contact:', error.message);
