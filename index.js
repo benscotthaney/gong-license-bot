@@ -400,6 +400,46 @@ async function findAccountByDomain(email) {
 }
 
 /**
+ * Check if account has an active Gong subscription
+ * Looks for Ruby__Subscription__c where:
+ * - Customer_Account_Id__c = accountId
+ * - Ruby__Status__c = 'Active'
+ * - Ruby__BillingAccount__c = Gong Reseller Account ID
+ */
+async function findActiveGongSubscription(accountId) {
+  try {
+    if (!CONFIG.gongResellerAccountId) {
+      console.log('⚠️ Gong Reseller Account ID not cached, cannot check subscriptions');
+      return null;
+    }
+
+    console.log(`🔍 Checking for active Gong subscription for account: ${accountId}`);
+
+    const result = await sfQuery(
+      `SELECT Id, Name, Ruby__Status__c, Ruby__BillingAccount__c, Ruby__Quantity__c,
+              Ruby__ProductName__c, Ruby__SubscriptionStartDate__c, Ruby__SubscriptionEndDate__c
+       FROM Ruby__Subscription__c
+       WHERE Customer_Account_Id__c = '${accountId}'
+       AND Ruby__Status__c = 'Active'
+       AND Ruby__BillingAccount__c = '${CONFIG.gongResellerAccountId}'
+       LIMIT 1`
+    );
+
+    if (result.records.length > 0) {
+      console.log(`✅ Found active Gong subscription: ${result.records[0].Name}`);
+      return result.records[0];
+    }
+
+    console.log('ℹ️ No active Gong subscription found');
+    return null;
+  } catch (error) {
+    // Ruby__Subscription__c object might not exist or field names might be different
+    console.error('❌ Error checking for Gong subscription:', error.message);
+    return null;
+  }
+}
+
+/**
  * Search for an Account by name (fallback)
  */
 async function findAccountByName(accountName) {
@@ -784,8 +824,11 @@ app.message(async ({ message, client, logger }) => {
       }
 
     } else {
-      // Customer account - don't create opportunity, just notify
-      logger.info('ℹ️ Customer account - notifying team');
+      // Customer account - don't create opportunity, check for existing Gong subscription
+      logger.info('ℹ️ Customer account - checking for existing Gong subscription');
+
+      // Check if they have an active Gong subscription
+      const gongSubscription = await findActiveGongSubscription(account.Id);
 
       // Add info reaction
       try {
@@ -796,12 +839,28 @@ app.message(async ({ message, client, logger }) => {
         });
       } catch (e) {}
 
-      const replyText = `ℹ️ *Existing Customer Account*\n\n` +
+      let replyText = `ℹ️ *Existing Customer Account*\n\n` +
         `*Account:* <${urls.accountUrl}|${account.Name}>\n` +
         `*Account Type:* ${accountType}\n` +
-        `*Contact:* <${urls.contactUrl}|${contact.Name}>${contactCreated ? ' _(newly created)_' : ''}\n\n` +
-        `No opportunity created - this is an existing customer.\n\n` +
-        `<@${CONFIG.customerTagUser}> - please review this license request.`;
+        `*Contact:* <${urls.contactUrl}|${contact.Name}>${contactCreated ? ' _(newly created)_' : ''}\n\n`;
+
+      if (gongSubscription) {
+        // Has existing Gong subscription - provide CLM instructions
+        replyText += `✅ *Has Active Gong Subscription:* ${gongSubscription.Name || 'Yes'}\n`;
+        if (gongSubscription.Ruby__Quantity__c) {
+          replyText += `*Current Quantity:* ${gongSubscription.Ruby__Quantity__c}\n`;
+        }
+        replyText += `\n📋 *To add licenses:*\n`;
+        replyText += `1. Go to Customer Lifecycle Manager\n`;
+        replyText += `2. Update quantity on the subscription\n`;
+        replyText += `3. Checkout → Activate the order → Activate the order → Carry on\n`;
+      } else {
+        // No Gong subscription - they need to set one up
+        replyText += `⚠️ *No active Gong reseller subscription found*\n\n`;
+        replyText += `This customer may need a new Gong subscription set up.`;
+      }
+
+      replyText += `\n\n<@${CONFIG.customerTagUser}> - please review this license request.`;
 
       await postThreadReply(client, message, replyText);
     }
