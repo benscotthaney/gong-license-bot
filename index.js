@@ -30,6 +30,44 @@ const CONFIG = {
 
 // Salesforce connection
 let sfConnection = null;
+let sfTokenExpiry = null;
+
+/**
+ * Ensure Salesforce connection is valid, refresh if expired
+ */
+async function ensureSalesforceConnection() {
+  // If no connection or token might be expired, reinitialize
+  if (!sfConnection || (sfTokenExpiry && Date.now() > sfTokenExpiry)) {
+    console.log('🔄 Salesforce session expired or missing, reconnecting...');
+    return await initSalesforce();
+  }
+  return true;
+}
+
+/**
+ * Execute a Salesforce query with automatic retry on session expiry
+ */
+async function sfQuery(soql, retried = false) {
+  try {
+    await ensureSalesforceConnection();
+    return await sfConnection.query(soql);
+  } catch (error) {
+    // Check if this is a session expiry error
+    if (!retried && (
+      error.message.includes('Session expired') ||
+      error.message.includes('INVALID_SESSION_ID') ||
+      error.message.includes('invalid')
+    )) {
+      console.log('🔄 Session error detected, refreshing connection...');
+      sfConnection = null; // Force reconnection
+      const reconnected = await initSalesforce();
+      if (reconnected) {
+        return await sfQuery(soql, true); // Retry once
+      }
+    }
+    throw error;
+  }
+}
 
 /**
  * Initialize Salesforce connection using Client Credentials Flow (OAuth2)
@@ -66,8 +104,12 @@ async function initSalesforce() {
       accessToken: tokenData.access_token,
     });
 
+    // Set token expiry (Salesforce tokens last ~2 hours, refresh after 1.5 hours to be safe)
+    sfTokenExpiry = Date.now() + (90 * 60 * 1000); // 90 minutes
+
     console.log('✅ Connected to Salesforce (Client Credentials Flow)');
     console.log(`   Instance URL: ${tokenData.instance_url}`);
+    console.log(`   Token expires at: ${new Date(sfTokenExpiry).toISOString()}`);
 
     // Cache the Gong Reseller Account ID if not already set
     if (!CONFIG.gongResellerAccountId) {
@@ -86,7 +128,7 @@ async function initSalesforce() {
  */
 async function cacheGongResellerAccountId() {
   try {
-    const result = await sfConnection.query(
+    const result = await sfQuery(
       `SELECT Id, Name FROM Account WHERE Name = '${CONFIG.gongResellerAccountName}' LIMIT 1`
     );
 
@@ -223,7 +265,7 @@ async function findContactByEmail(email) {
     const cleanEmail = email.trim().toLowerCase();
     console.log(`🔍 Searching for contact by email: ${cleanEmail}`);
 
-    const result = await sfConnection.query(
+    const result = await sfQuery(
       `SELECT Id, Name, Email, AccountId, Account.Id, Account.Name, Account.Type
        FROM Contact
        WHERE Email = '${cleanEmail}'
@@ -250,7 +292,7 @@ async function findContactByEmail(email) {
 async function findContactByEmailAndAccount(email, accountId) {
   try {
     // First try exact email match on account
-    let result = await sfConnection.query(
+    let result = await sfQuery(
       `SELECT Id, Name, Email, AccountId, Account.Id, Account.Name, Account.Type
        FROM Contact
        WHERE Email = '${email}' AND AccountId = '${accountId}'
@@ -262,7 +304,7 @@ async function findContactByEmailAndAccount(email, accountId) {
     }
 
     // Try case-insensitive email search on account
-    result = await sfConnection.query(
+    result = await sfQuery(
       `SELECT Id, Name, Email, AccountId, Account.Id, Account.Name, Account.Type
        FROM Contact
        WHERE AccountId = '${accountId}'
@@ -289,7 +331,7 @@ async function findContactByEmailAndAccount(email, accountId) {
  */
 async function getAccountById(accountId) {
   try {
-    const result = await sfConnection.query(
+    const result = await sfQuery(
       `SELECT Id, Name, Type
        FROM Account
        WHERE Id = '${accountId}'
@@ -320,7 +362,7 @@ async function findAccountByDomain(email) {
     console.log(`ð Searching for account by domain: ${domain}`);
 
     // Search by Website field containing the domain
-    let result = await sfConnection.query(
+    let result = await sfQuery(
       `SELECT Id, Name, Type, Website
        FROM Account
        WHERE Website LIKE '%${domain}%'
@@ -335,7 +377,7 @@ async function findAccountByDomain(email) {
     // Also try searching by domain field if it exists, or by the Domain custom field
     // Common field names: Domain__c, Email_Domain__c, Website_Domain__c
     try {
-      result = await sfConnection.query(
+      result = await sfQuery(
         `SELECT Id, Name, Type, Website
          FROM Account
          WHERE Domain__c = '${domain}'
@@ -363,7 +405,7 @@ async function findAccountByDomain(email) {
 async function findAccountByName(accountName) {
   try {
     // Try exact match first
-    let result = await sfConnection.query(
+    let result = await sfQuery(
       `SELECT Id, Name, Type
        FROM Account
        WHERE Name = '${accountName.replace(/'/g, "\\'")}'
@@ -375,7 +417,7 @@ async function findAccountByName(accountName) {
     }
 
     // Try LIKE match (contains)
-    result = await sfConnection.query(
+    result = await sfQuery(
       `SELECT Id, Name, Type
        FROM Account
        WHERE Name LIKE '%${accountName.replace(/'/g, "\\'")}%'
@@ -411,7 +453,7 @@ async function createContact(firstName, lastName, email, accountId) {
       console.log(`✅ Created Contact: ${firstName} ${lastName} (${result.id})`);
 
       // Fetch the full contact record to return
-      const contact = await sfConnection.query(
+      const contact = await sfQuery(
         `SELECT Id, Name, Email, AccountId, Account.Id, Account.Name, Account.Type
          FROM Contact
          WHERE Id = '${result.id}'
