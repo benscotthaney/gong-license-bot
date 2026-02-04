@@ -26,6 +26,12 @@ const CONFIG = {
 
   // Cached Gong Reseller Account ID
   gongResellerAccountId: process.env.GONG_RESELLER_ACCOUNT_ID || null,
+
+  // Price Book Entry IDs for Quote Line Items (for reference in messages)
+  priceBookEntries: {
+    handoff: '01t6T000006XZ6EQAW',      // Handoff License (Monthly)
+    chilical: '01tPK000001c7hUYAQ',     // ChiliCal Teams License (Monthly)
+  },
 };
 
 // Salesforce connection
@@ -203,6 +209,73 @@ function extractCustomerName(text) {
     return name;
   }
   return null;
+}
+
+/**
+ * Extract License Type from Zapier license request message
+ * Returns 'handoff' or 'chilical' based on the message content
+ */
+function extractLicenseType(text) {
+  // Clean up Slack formatting
+  const cleanText = text.replace(/\*/g, '').toLowerCase();
+
+  // Look for license type indicators
+  // The message typically starts with the license type
+  if (cleanText.includes('chilical') || cleanText.includes('chili cal') || cleanText.includes('chili-cal')) {
+    console.log('📋 Extracted license type: ChiliCal');
+    return 'chilical';
+  }
+
+  if (cleanText.includes('handoff')) {
+    console.log('📋 Extracted license type: Handoff');
+    return 'handoff';
+  }
+
+  // Default to handoff if not found
+  console.log('📋 License type not found, defaulting to: Handoff');
+  return 'handoff';
+}
+
+/**
+ * Extract License Count from Zapier license request message
+ * Looks for patterns like "License Count: 240" or "Licenses: 240"
+ */
+function extractLicenseCount(text) {
+  // Clean up Slack formatting
+  const cleanText = text.replace(/\*/g, '');
+
+  // Look for "License Count:" followed by a number
+  const licenseCountPattern = /License\s*Count:\s*(\d+)/i;
+  const match = cleanText.match(licenseCountPattern);
+
+  if (match) {
+    const count = parseInt(match[1], 10);
+    console.log(`📊 Extracted license count: ${count}`);
+    return count;
+  }
+
+  // Fallback: look for "Licenses:" followed by a number
+  const licensesPattern = /Licenses:\s*(\d+)/i;
+  const fallbackMatch = cleanText.match(licensesPattern);
+
+  if (fallbackMatch) {
+    const count = parseInt(fallbackMatch[1], 10);
+    console.log(`📊 Extracted license count (fallback): ${count}`);
+    return count;
+  }
+
+  // Try to find any number after "license" keyword
+  const anyNumberPattern = /license[s]?\s*[:\-]?\s*(\d+)/i;
+  const anyMatch = cleanText.match(anyNumberPattern);
+
+  if (anyMatch) {
+    const count = parseInt(anyMatch[1], 10);
+    console.log(`📊 Extracted license count (loose match): ${count}`);
+    return count;
+  }
+
+  console.log('⚠️ Could not extract license count, defaulting to 1');
+  return 1;
 }
 
 /**
@@ -626,6 +699,153 @@ async function createOpportunityWithoutCustomFields(contact, account) {
 }
 
 /**
+ * Create a Quote for an Opportunity
+ */
+async function createQuote(opportunityId, accountName, licenseType, licenseCount) {
+  try {
+    // Calculate expiration date (30 days from now)
+    const expirationDate = new Date();
+    expirationDate.setDate(expirationDate.getDate() + 30);
+    const expirationDateStr = expirationDate.toISOString().split('T')[0];
+
+    // Build quote name
+    const quoteName = `${accountName} - Gong License Quote`;
+
+    const quoteData = {
+      Name: quoteName,
+      OpportunityId: opportunityId,
+      Status: 'Draft',
+      ExpirationDate: expirationDateStr,
+    };
+
+    // Add Billing Account if available
+    if (CONFIG.gongResellerAccountId) {
+      quoteData.BillingAccount__c = CONFIG.gongResellerAccountId;
+    }
+
+    console.log(`📝 Creating Quote: ${quoteName}`);
+    console.log(`   OpportunityId: ${opportunityId}`);
+    console.log(`   License Type: ${licenseType}`);
+    console.log(`   License Count: ${licenseCount}`);
+
+    const result = await sfConnection.sobject('Quote').create(quoteData);
+
+    if (result.success) {
+      console.log(`✅ Created Quote: ${quoteName} (${result.id})`);
+
+      // Now create the Quote Line Item
+      const lineItemCreated = await createQuoteLineItem(result.id, licenseType, licenseCount);
+
+      return {
+        id: result.id,
+        name: quoteName,
+        url: `${CONFIG.sfInstanceUrl}/lightning/r/Quote/${result.id}/view`,
+        lineItemCreated: lineItemCreated,
+      };
+    } else {
+      console.error('❌ Failed to create quote:', result.errors);
+      return null;
+    }
+  } catch (error) {
+    console.error('❌ Error creating quote:', error.message);
+
+    // If BillingAccount__c doesn't exist, try without it
+    if (error.message.includes('BillingAccount__c') || error.message.includes('No such column')) {
+      console.log('⚠️ BillingAccount__c field not found on Quote, retrying without it...');
+      return await createQuoteWithoutBillingAccount(opportunityId, accountName, licenseType, licenseCount);
+    }
+
+    return null;
+  }
+}
+
+/**
+ * Create Quote without Billing Account field (fallback)
+ */
+async function createQuoteWithoutBillingAccount(opportunityId, accountName, licenseType, licenseCount) {
+  try {
+    const expirationDate = new Date();
+    expirationDate.setDate(expirationDate.getDate() + 30);
+    const expirationDateStr = expirationDate.toISOString().split('T')[0];
+
+    const quoteName = `${accountName} - Gong License Quote`;
+
+    const quoteData = {
+      Name: quoteName,
+      OpportunityId: opportunityId,
+      Status: 'Draft',
+      ExpirationDate: expirationDateStr,
+    };
+
+    const result = await sfConnection.sobject('Quote').create(quoteData);
+
+    if (result.success) {
+      console.log(`✅ Created Quote (without BillingAccount): ${quoteName} (${result.id})`);
+
+      // Create the Quote Line Item
+      const lineItemCreated = await createQuoteLineItem(result.id, licenseType, licenseCount);
+
+      return {
+        id: result.id,
+        name: quoteName,
+        url: `${CONFIG.sfInstanceUrl}/lightning/r/Quote/${result.id}/view`,
+        lineItemCreated: lineItemCreated,
+        note: '⚠️ BillingAccount not set on quote - please add manually',
+      };
+    }
+    return null;
+  } catch (error) {
+    console.error('❌ Error creating quote (fallback):', error.message);
+    return null;
+  }
+}
+
+/**
+ * Create a Quote Line Item with the appropriate product
+ */
+async function createQuoteLineItem(quoteId, licenseType, quantity) {
+  try {
+    // Get the correct Price Book Entry ID based on license type
+    const priceBookEntryId = licenseType === 'chilical'
+      ? CONFIG.priceBookEntries.chilical
+      : CONFIG.priceBookEntries.handoff;
+
+    const productName = licenseType === 'chilical'
+      ? 'ChiliCal Teams License (Monthly)'
+      : 'Handoff License (Monthly)';
+
+    console.log(`📦 Creating Quote Line Item:`);
+    console.log(`   Product: ${productName}`);
+    console.log(`   PriceBookEntryId: ${priceBookEntryId}`);
+    console.log(`   Quantity: ${quantity}`);
+
+    const lineItemData = {
+      QuoteId: quoteId,
+      PricebookEntryId: priceBookEntryId,
+      Quantity: quantity,
+      // UnitPrice will be pulled from the Price Book Entry
+    };
+
+    const result = await sfConnection.sobject('QuoteLineItem').create(lineItemData);
+
+    if (result.success) {
+      console.log(`✅ Created Quote Line Item: ${productName} x ${quantity} (${result.id})`);
+      return {
+        id: result.id,
+        product: productName,
+        quantity: quantity,
+      };
+    } else {
+      console.error('❌ Failed to create quote line item:', result.errors);
+      return null;
+    }
+  } catch (error) {
+    console.error('❌ Error creating quote line item:', error.message);
+    return null;
+  }
+}
+
+/**
  * Build Salesforce URLs
  */
 function buildSalesforceUrls(contact, account) {
@@ -782,12 +1002,17 @@ app.message(async ({ message, client, logger }) => {
     const accountType = account.Type || 'Unknown';
     const urls = buildSalesforceUrls(contact, account);
 
-    logger.info(`ð Account Type: ${accountType}`);
+    // Extract license details from the Zapier message
+    const licenseType = extractLicenseType(text);
+    const licenseCount = extractLicenseCount(text);
+    logger.info(`📋 License Type: ${licenseType}, Count: ${licenseCount}`);
+
+    logger.info(`🏢 Account Type: ${accountType}`);
 
     // Handle based on account type
     if (accountType.toLowerCase() === 'prospect') {
       // Create opportunity for Prospect
-      logger.info('ð Creating opportunity for Prospect account...');
+      logger.info('💼 Creating opportunity for Prospect account...');
 
       const opportunity = await createOpportunity(contact, account, customerName);
 
@@ -801,6 +1026,13 @@ app.message(async ({ message, client, logger }) => {
           });
         } catch (e) {}
 
+        const productName = licenseType === 'chilical'
+          ? 'ChiliCal Teams License (Monthly)'
+          : 'Handoff License (Monthly)';
+
+        // Build QuoteBuilder URL for easy quote creation
+        const quoteBuilderUrl = `${CONFIG.sfInstanceUrl}/lightning/cmp/Ruby__QuoteBuilder?c__mode=create_quote&c__opportunityId=${opportunity.id}`;
+
         let replyText = `✅ *Opportunity Created!*\n\n` +
           `*Account:* <${urls.accountUrl}|${account.Name}>\n` +
           `*Account Type:* Prospect\n` +
@@ -810,6 +1042,12 @@ app.message(async ({ message, client, logger }) => {
         if (opportunity.note) {
           replyText += `\n\n${opportunity.note}`;
         }
+
+        // Add quote creation instructions
+        replyText += `\n\n📝 *Create Quote:*\n`;
+        replyText += `<${quoteBuilderUrl}|Click here to create quote>\n`;
+        replyText += `• *Product:* ${productName}\n`;
+        replyText += `• *Quantity:* ${licenseCount}`;
 
         // Tag Guilherme for review
         replyText += `\n\n<@${CONFIG.customerTagUser}> - new prospect opportunity created for review.`;
@@ -1014,6 +1252,11 @@ app.event('app_mention', async ({ event, client, logger }) => {
     const accountType = account.Type || 'Unknown';
     const urls = buildSalesforceUrls(contact, account);
 
+    // Extract license details from the message
+    const licenseType = extractLicenseType(parentMessage.text);
+    const licenseCount = extractLicenseCount(parentMessage.text);
+    logger.info(`📋 License Type: ${licenseType}, Count: ${licenseCount}`);
+
     // Process based on account type
     if (accountType.toLowerCase() === 'prospect') {
       // Prospect - create opportunity
@@ -1029,6 +1272,13 @@ app.event('app_mention', async ({ event, client, logger }) => {
           });
         } catch (e) {}
 
+        const productName = licenseType === 'chilical'
+          ? 'ChiliCal Teams License (Monthly)'
+          : 'Handoff License (Monthly)';
+
+        // Build QuoteBuilder URL for easy quote creation
+        const quoteBuilderUrl = `${CONFIG.sfInstanceUrl}/lightning/cmp/Ruby__QuoteBuilder?c__mode=create_quote&c__opportunityId=${opportunity.id}`;
+
         let replyText = `✅ *Opportunity Created!*\n\n` +
           `*Account:* <${urls.accountUrl}|${account.Name}>\n` +
           `*Account Type:* Prospect\n` +
@@ -1038,6 +1288,12 @@ app.event('app_mention', async ({ event, client, logger }) => {
         if (opportunity.note) {
           replyText += `\n\n${opportunity.note}`;
         }
+
+        // Add quote creation instructions
+        replyText += `\n\n📝 *Create Quote:*\n`;
+        replyText += `<${quoteBuilderUrl}|Click here to create quote>\n`;
+        replyText += `• *Product:* ${productName}\n`;
+        replyText += `• *Quantity:* ${licenseCount}`;
 
         // Tag Guilherme for review
         replyText += `\n\n<@${CONFIG.customerTagUser}> - new prospect opportunity created for review.`;
