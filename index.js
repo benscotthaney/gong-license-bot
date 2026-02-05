@@ -612,7 +612,7 @@ async function createOpportunity(contact, account, customerName) {
       AccountId: account.Id,
       StageName: 'Demo', // From your screenshot
       CloseDate: closeDateStr,
-      Type: 'Inbound',
+      Type: 'New Business',
       LeadSource: 'Partner', // Since it's from Gong
       // Hardcoded fields for all Gong License Bot requests
       Won_Lost_Reason__c: 'Gong Reseller Referral',
@@ -676,7 +676,7 @@ async function createOpportunityWithoutCustomFields(contact, account) {
       AccountId: account.Id,
       StageName: 'Demo',
       CloseDate: closeDateStr,
-      Type: 'Inbound',
+      Type: 'New Business',
       LeadSource: 'Partner',
     };
 
