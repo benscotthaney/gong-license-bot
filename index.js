@@ -1010,9 +1010,16 @@ app.message(async ({ message, client, logger }) => {
     logger.info(`🏢 Account Type: ${accountType}`);
 
     // Handle based on account type
-    if (accountType.toLowerCase() === 'prospect') {
-      // Create opportunity for Prospect
-      logger.info('💼 Creating opportunity for Prospect account...');
+    // Create opportunities for both Prospect and Ex-Customer accounts
+    if (accountType.toLowerCase() === 'prospect' || accountType.toLowerCase() === 'ex-customer') {
+      // Create opportunity for Prospect or Ex-Customer
+      logger.info(`💼 Creating opportunity for ${accountType} account...`);
+
+      // For Ex-Customer, check for Gong subscription first
+      let gongSubscription = null;
+      if (accountType.toLowerCase() === 'ex-customer') {
+        gongSubscription = await findActiveGongSubscription(account.Id);
+      }
 
       const opportunity = await createOpportunity(contact, account, customerName);
 
@@ -1035,12 +1042,18 @@ app.message(async ({ message, client, logger }) => {
 
         let replyText = `✅ *Opportunity Created!*\n\n` +
           `*Account:* <${urls.accountUrl}|${account.Name}>\n` +
-          `*Account Type:* Prospect\n` +
+          `*Account Type:* ${accountType}\n` +
           `*Contact:* <${urls.contactUrl}|${contact.Name}>${contactCreated ? ' _(newly created)_' : ''}\n` +
           `*Opportunity:* <${opportunity.url}|${opportunity.name}>`;
 
         if (opportunity.note) {
           replyText += `\n\n${opportunity.note}`;
+        }
+
+        // For Ex-Customer, add Gong subscription warning if none found
+        if (accountType.toLowerCase() === 'ex-customer' && !gongSubscription) {
+          replyText += `\n\n⚠️ *No active Gong reseller subscription found*\n`;
+          replyText += `This customer may need a new Gong subscription set up.`;
         }
 
         // Add quote creation instructions
@@ -1050,7 +1063,10 @@ app.message(async ({ message, client, logger }) => {
         replyText += `• *Quantity:* ${licenseCount}`;
 
         // Tag Guilherme for review
-        replyText += `\n\n<@${CONFIG.customerTagUser}> - new prospect opportunity created for review.`;
+        const reviewMsg = accountType.toLowerCase() === 'ex-customer'
+          ? 'ex-customer opportunity created for review.'
+          : 'new prospect opportunity created for review.';
+        replyText += `\n\n<@${CONFIG.customerTagUser}> - ${reviewMsg}`;
 
         await postThreadReply(client, message, replyText);
       } else {
@@ -1258,8 +1274,16 @@ app.event('app_mention', async ({ event, client, logger }) => {
     logger.info(`📋 License Type: ${licenseType}, Count: ${licenseCount}`);
 
     // Process based on account type
-    if (accountType.toLowerCase() === 'prospect') {
-      // Prospect - create opportunity
+    // Create opportunities for both Prospect and Ex-Customer accounts
+    if (accountType.toLowerCase() === 'prospect' || accountType.toLowerCase() === 'ex-customer') {
+      // Prospect or Ex-Customer - create opportunity
+
+      // For Ex-Customer, check for Gong subscription first
+      let gongSubscription = null;
+      if (accountType.toLowerCase() === 'ex-customer') {
+        gongSubscription = await findActiveGongSubscription(account.Id);
+      }
+
       const opportunity = await createOpportunity(contact, account);
 
       if (opportunity) {
@@ -1281,12 +1305,18 @@ app.event('app_mention', async ({ event, client, logger }) => {
 
         let replyText = `✅ *Opportunity Created!*\n\n` +
           `*Account:* <${urls.accountUrl}|${account.Name}>\n` +
-          `*Account Type:* Prospect\n` +
+          `*Account Type:* ${accountType}\n` +
           `*Contact:* <${urls.contactUrl}|${contact.Name}>${contactCreated ? ' _(newly created)_' : ''}\n` +
           `*Opportunity:* <${opportunity.url}|${opportunity.name}>`;
 
         if (opportunity.note) {
           replyText += `\n\n${opportunity.note}`;
+        }
+
+        // For Ex-Customer, add Gong subscription warning if none found
+        if (accountType.toLowerCase() === 'ex-customer' && !gongSubscription) {
+          replyText += `\n\n⚠️ *No active Gong reseller subscription found*\n`;
+          replyText += `This customer may need a new Gong subscription set up.`;
         }
 
         // Add quote creation instructions
@@ -1296,7 +1326,10 @@ app.event('app_mention', async ({ event, client, logger }) => {
         replyText += `• *Quantity:* ${licenseCount}`;
 
         // Tag Guilherme for review
-        replyText += `\n\n<@${CONFIG.customerTagUser}> - new prospect opportunity created for review.`;
+        const reviewMsg = accountType.toLowerCase() === 'ex-customer'
+          ? 'ex-customer opportunity created for review.'
+          : 'new prospect opportunity created for review.';
+        replyText += `\n\n<@${CONFIG.customerTagUser}> - ${reviewMsg}`;
 
         await client.chat.postMessage({
           channel: event.channel,
@@ -1314,7 +1347,7 @@ app.event('app_mention', async ({ event, client, logger }) => {
         });
       }
     } else {
-      // Customer account
+      // Customer account - don't create opportunity
       try {
         await client.reactions.add({
           channel: event.channel,
@@ -1323,12 +1356,29 @@ app.event('app_mention', async ({ event, client, logger }) => {
         });
       } catch (e) {}
 
-      const replyText = `ℹ️ *Existing Customer Account*\n\n` +
+      // Check for Gong subscription
+      const gongSubscription = await findActiveGongSubscription(account.Id);
+
+      let replyText = `ℹ️ *Existing Customer Account*\n\n` +
         `*Account:* <${urls.accountUrl}|${account.Name}>\n` +
         `*Account Type:* ${accountType}\n` +
-        `*Contact:* <${urls.contactUrl}|${contact.Name}>${contactCreated ? ' _(newly created)_' : ''}\n\n` +
-        `No opportunity created - this is an existing customer.\n\n` +
-        `<@${CONFIG.customerTagUser}> - please review this license request.`;
+        `*Contact:* <${urls.contactUrl}|${contact.Name}>${contactCreated ? ' _(newly created)_' : ''}\n\n`;
+
+      if (gongSubscription) {
+        replyText += `✅ *Has Active Gong Subscription:* ${gongSubscription.Name || 'Yes'}\n`;
+        if (gongSubscription.Ruby__Quantity__c) {
+          replyText += `*Current Quantity:* ${gongSubscription.Ruby__Quantity__c}\n`;
+        }
+        replyText += `\n📋 *To add licenses:*\n`;
+        replyText += `1. Go to Customer Lifecycle Manager\n`;
+        replyText += `2. Update quantity on the subscription\n`;
+        replyText += `3. Checkout → Activate the order → Activate the order → Carry on\n`;
+      } else {
+        replyText += `⚠️ *No active Gong reseller subscription found*\n\n`;
+        replyText += `This customer may need a new Gong subscription set up.`;
+      }
+
+      replyText += `\n\n<@${CONFIG.customerTagUser}> - please review this license request.`;
 
       await client.chat.postMessage({
         channel: event.channel,
